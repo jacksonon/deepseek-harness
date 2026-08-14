@@ -44,8 +44,7 @@ jobs:
 
       - name: Probe — Electron-as-node (desktop app spawn path)
         shell: pwsh
-        env:
-          PROBE_ELECTRON: "$env:RUNNER_TEMP\electron\electron.exe"
         run: |
+          $env:PROBE_ELECTRON = "$env:RUNNER_TEMP\electron\electron.exe"
           $env:ELECTRON_RUN_AS_NODE = "1"
           node desktop/probe-picker.mjs "$env:RUNNER_TEMP\picker\unpacked" electron
