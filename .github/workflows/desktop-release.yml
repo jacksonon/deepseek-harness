@@ -43,17 +43,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  # Signing credentials are intentionally NOT set here: an unset secret would
-  # still export an empty string, and electron-builder's mac signer treats an
-  # empty CSC_LINK as a real (broken) certificate path. Each build job
-  # exports the vars it needs to $GITHUB_ENV only when the secrets are
-  # non-empty (see "Export signing and notarization credentials").
-  #   - CSC_LINK / CSC_KEY_PASSWORD  — code-signing certificate (base64 p12)
-  #     for both macOS and Windows
-  #   - APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID — macOS
-  #     notarization credentials; when all three are set the mac build is
-  #     notarized as well
+# Signing credentials are intentionally not set at workflow level: an unset
+# secret would still export an empty string, and electron-builder's mac
+# signer treats an empty CSC_LINK as a real (broken) certificate path. Each
+# build job exports the vars it needs to $GITHUB_ENV only when the secrets
+# are non-empty (see "Export signing and notarization credentials"):
+#   - CSC_LINK / CSC_KEY_PASSWORD  — code-signing certificate (base64 p12)
+#     for both macOS and Windows
+#   - APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID — macOS
+#     notarization credentials; when all three are set the mac build is
+#     notarized as well
 
 jobs:
   build-mac:
