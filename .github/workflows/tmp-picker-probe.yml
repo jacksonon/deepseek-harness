@@ -17,9 +17,14 @@ jobs:
         with:
           node-version: 24
 
-      - name: Install desktop dependencies (for the Electron binary)
-        working-directory: desktop
-        run: npm ci
+      - name: Download the Electron binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\electron" | Out-Null
+          curl.exe -L --retry 3 -o "$env:RUNNER_TEMP\electron\electron.zip" `
+            "https://github.com/electron/electron/releases/download/v43.4.0/electron-v43.4.0-win32-x64.zip"
+          tar.exe -xf "$env:RUNNER_TEMP\electron\electron.zip" -C "$env:RUNNER_TEMP\electron"
+          Test-Path "$env:RUNNER_TEMP\electron\electron.exe"
 
       - name: Download and extract the packaged app
         shell: pwsh
@@ -40,7 +45,7 @@ jobs:
       - name: Probe — Electron-as-node (desktop app spawn path)
         shell: pwsh
         env:
-          PROBE_ELECTRON: '${{ github.workspace }}\desktop\node_modules\electron\dist\electron.exe'
+          PROBE_ELECTRON: "$env:RUNNER_TEMP\electron\electron.exe"
         run: |
           $env:ELECTRON_RUN_AS_NODE = "1"
           node desktop/probe-picker.mjs "$env:RUNNER_TEMP\picker\unpacked" electron
