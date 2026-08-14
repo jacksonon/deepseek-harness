@@ -1,0 +1,44 @@
+# TEMP diagnostic workflow — delete after the picker investigation closes.
+# Reproduces the packaged-app win32 dialog worker spawn on a real Windows
+# runner: plain node first (CI baseline), then the packaged-app Electron
+# binary in ELECTRON_RUN_AS_NODE mode (the desktop app's real spawn path).
+name: TMP Picker Probe
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install desktop dependencies (for the Electron binary)
+        working-directory: desktop
+        run: npm ci
+
+      - name: Download and extract the packaged app
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\picker" | Out-Null
+          curl.exe -L --retry 3 -o "$env:RUNNER_TEMP\picker\Setup.exe" `
+            "https://github.com/jacksonon/deepseek-harness/releases/download/v0.1.0/DeepSeek.Harness.Setup.0.1.0.exe"
+          & "C:\Program Files\7-Zip\7z.exe" x "$env:RUNNER_TEMP\picker\Setup.exe" `
+            "-o$env:RUNNER_TEMP\picker\unpacked" -y | Out-Null
+          Get-ChildItem "$env:RUNNER_TEMP\picker\unpacked" | Select-Object -First 5 Name
+
+      - name: Probe — plain node
+        shell: pwsh
+        run: node desktop/probe-picker.mjs "$env:RUNNER_TEMP\picker\unpacked" node
+
+      - name: Probe — Electron-as-node (desktop app spawn path)
+        shell: pwsh
+        env:
+          PROBE_ELECTRON: '${{ github.workspace }}\desktop\node_modules\electron\dist\electron.exe'
+        run: |
+          $env:ELECTRON_RUN_AS_NODE = "1"
+          node desktop/probe-picker.mjs "$env:RUNNER_TEMP\picker\unpacked" electron
