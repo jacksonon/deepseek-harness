@@ -27,9 +27,11 @@ jobs:
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\picker" | Out-Null
           curl.exe -L --retry 3 -o "$env:RUNNER_TEMP\picker\Setup.exe" `
             "https://github.com/jacksonon/deepseek-harness/releases/download/v0.1.0/DeepSeek.Harness.Setup.0.1.0.exe"
-          & "C:\Program Files\7-Zip\7z.exe" x "$env:RUNNER_TEMP\picker\Setup.exe" `
-            "-o$env:RUNNER_TEMP\picker\unpacked" -y | Out-Null
-          Get-ChildItem "$env:RUNNER_TEMP\picker\unpacked" | Select-Object -First 5 Name
+          # 7-Zip's NSIS handler only surfaces $PLUGINSDIR; the built-in
+          # tar.exe (libarchive) extracts the full payload like bsdtar does.
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\picker\unpacked" | Out-Null
+          tar.exe -xf "$env:RUNNER_TEMP\picker\Setup.exe" -C "$env:RUNNER_TEMP\picker\unpacked"
+          Get-ChildItem "$env:RUNNER_TEMP\picker\unpacked" | Select-Object -First 6 Name
 
       - name: Probe — plain node
         shell: pwsh
