@@ -43,8 +43,9 @@ const timer = setTimeout(() => {
   child.kill()
 }, 8000)
 child.on('message', (m) => {
+  // 'showing' proves IPC + koffi + COM all work; the dialog then blocks
+  // until the timer above kills the worker.
   console.log(`[probe] WORKER_MESSAGE ${JSON.stringify(m)}`)
-  if (m.kind === 'showing') clearTimeout(timer)
 })
 child.on('error', (e) => {
   clearTimeout(timer)
