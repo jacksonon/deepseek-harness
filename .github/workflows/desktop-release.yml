@@ -1,0 +1,213 @@
+# Build and publish the DeepSeek Harness desktop app (Electron) for macOS and
+# Windows. The app is fully standalone: the harness server runtime
+# (@deepseek-ai/dsh) is bundled as a dependency and booted with Electron's
+# own Node (ELECTRON_RUN_AS_NODE), so target machines need no dsh CLI and no
+# Node. Each platform builds on its native runner with the desktop app's own
+# npm lockfile; the packaged artifact is smoke-tested in place, then the
+# artifacts land as GitHub Release assets.
+#
+# Usage:
+#   - Manual rehearsal: Actions → Desktop App Release → Run workflow
+#     (publish left off) — binaries are kept as run artifacts for 7 days.
+#   - Publish: push a `v*` tag (auto-publish), or dispatch the workflow from
+#     a `v*` tag with publish=true. Artifacts are uploaded to the GitHub
+#     Release of that tag; release notes are generated from the changelog.
+#
+# Signing/notarization is driven by repository secrets; without them the
+# build is unsigned (macOS gets ad-hoc signing). Set the secrets to sign:
+#   - CSC_LINK / CSC_KEY_PASSWORD  — code-signing certificate (base64 p12)
+#     for both macOS and Windows
+#   - APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID — macOS
+#     notarization credentials; when all three are set the mac build is
+#     notarized as well
+name: Desktop App Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Upload artifacts to the GitHub Release of the current tag. Must run from a v* tag.
+        required: true
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  # Release assets are shared tag state; serialize runs so two versions
+  # cannot race the same Release.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Empty when the secrets are not configured; electron-builder only signs
+  # (and the mac job only notarizes) when the relevant values are present.
+  CSC_LINK: ${{ secrets.CSC_LINK }}
+  CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+  APPLE_ID: ${{ secrets.APPLE_ID }}
+  APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+  APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+jobs:
+  build-mac:
+    name: Build macOS app (arm64 + x64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Compute notarize flag
+        id: notarize
+        shell: bash
+        run: |
+          if [ -n "${APPLE_ID}" ] && [ -n "${APPLE_APP_SPECIFIC_PASSWORD}" ] && [ -n "${APPLE_TEAM_ID}" ]; then
+            echo "flag=-c.mac.notarize=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build macOS artifacts
+        working-directory: desktop
+        run: npx electron-builder --mac ${{ steps.notarize.outputs.flag }}
+
+      # Boot the packaged app's bundled server and load the GUI; the app
+      # prints DSH_DESKTOP_SMOKE_OK and exits 0 only when both succeed.
+      - name: Smoke-test the packaged app
+        working-directory: desktop
+        shell: bash
+        run: |
+          DSH_DESKTOP_SMOKE=1 "./dist/mac-arm64/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness"
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-mac
+          path: |
+            desktop/dist/*.dmg
+            desktop/dist/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  build-win:
+    name: Build Windows app (x64)
+    runs-on: windows-latest
+    env:
+      # Without a certificate in the store, fail fast rather than hunting for
+      # one; signing via CSC_LINK still applies when the secret is set.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build Windows artifacts
+        working-directory: desktop
+        run: npx electron-builder --win
+
+      # Same in-place smoke as the mac job; DSH_DESKTOP_SMOKE_OK + exit 0
+      # mean the bundled server booted and the GUI loaded inside the package.
+      - name: Smoke-test the packaged app
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          $env:DSH_DESKTOP_SMOKE = "1"
+          & "dist/win-unpacked/DeepSeek Harness.exe"
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-win
+          path: desktop/dist/*.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: [build-mac, build-win]
+    if: inputs.publish || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Require a tag ref
+        if: inputs.publish && !startsWith(github.ref, 'refs/tags/')
+        run: |
+          echo "::error::publish=true requires running from a v* tag (push a tag, or dispatch with the tag selected in the ref dropdown)."
+          exit 1
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Verify release assets
+        run: ls -la release-assets
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+
+  # ── TUI CLI release (reserved slot) ───────────────────────────────────────
+  # The TUI CLI publish lands here later (packages/bundle/tui-app). Model it
+  # on this file for GitHub Release assets, or on landlock-run-release.yml
+  # for npm publication, whichever matches the TUI's distribution shape.
+  # The publish job above merges every `release-*` artifact into the same
+  # Release, so a TUI job that uploads `release-tui-*` artifacts joins it
+  # with no changes here — just add the job and list it in publish's `needs`.
+  #
+  # tui-cli:
+  #   name: Build and publish TUI CLI
+  #   runs-on: ${{ matrix.runner }}
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       include:
+  #         - { runner: ubuntu-24.04,   target: linux-x64 }
+  #         - { runner: macos-14,       target: macos-arm64 }
+  #         - { runner: windows-latest, target: windows-x64 }
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: pnpm/action-setup@v4
+  #       with:
+  #         package_json_file: package.json
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 24
+  #         cache: pnpm
+  #         cache-dependency-path: pnpm-lock.yaml
+  #     - run: pnpm install --frozen-lockfile
+  #     - run: pnpm --filter <tui-package> build
+  #     - name: Upload TUI CLI artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: release-tui-${{ matrix.target }}
+  #         path: <tui-package-dist>   # TODO(tui-cli-release): real output path
+  #         if-no-files-found: error
+  #         retention-days: 7
