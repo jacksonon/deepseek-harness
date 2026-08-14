@@ -44,13 +44,16 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Empty when the secrets are not configured; electron-builder only signs
-  # (and the mac job only notarizes) when the relevant values are present.
-  CSC_LINK: ${{ secrets.CSC_LINK }}
-  CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-  APPLE_ID: ${{ secrets.APPLE_ID }}
-  APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-  APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+  # Signing credentials are intentionally NOT set here: an unset secret would
+  # still export an empty string, and electron-builder's mac signer treats an
+  # empty CSC_LINK as a real (broken) certificate path. Each build job
+  # exports the vars it needs to $GITHUB_ENV only when the secrets are
+  # non-empty (see "Export signing and notarization credentials").
+  #   - CSC_LINK / CSC_KEY_PASSWORD  — code-signing certificate (base64 p12)
+  #     for both macOS and Windows
+  #   - APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID — macOS
+  #     notarization credentials; when all three are set the mac build is
+  #     notarized as well
 
 jobs:
   build-mac:
@@ -69,21 +72,26 @@ jobs:
         working-directory: desktop
         run: npm ci
 
-      - name: Compute notarize flag
-        id: notarize
+      - name: Export signing and notarization credentials
+        id: signing
         shell: bash
         run: |
-          if [ -n "${APPLE_ID}" ] && [ -n "${APPLE_APP_SPECIFIC_PASSWORD}" ] && [ -n "${APPLE_TEAM_ID}" ]; then
-            echo "flag=-c.mac.notarize=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "flag=" >> "$GITHUB_OUTPUT"
+          if [ -n "${{ secrets.CSC_LINK }}" ]; then
+            echo "CSC_LINK=${{ secrets.CSC_LINK }}" >> "$GITHUB_ENV"
+            echo "CSC_KEY_PASSWORD=${{ secrets.CSC_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+          fi
+          if [ -n "${{ secrets.APPLE_ID }}" ] && [ -n "${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}" ] && [ -n "${{ secrets.APPLE_TEAM_ID }}" ]; then
+            echo "APPLE_ID=${{ secrets.APPLE_ID }}" >> "$GITHUB_ENV"
+            echo "APPLE_APP_SPECIFIC_PASSWORD=${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}" >> "$GITHUB_ENV"
+            echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}" >> "$GITHUB_ENV"
+            echo "notarize=-c.mac.notarize=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build macOS artifacts
         working-directory: desktop
         # --publish never: on a git tag electron-builder would implicitly
         # publish; the publish job below owns the GitHub Release upload.
-        run: npx electron-builder --mac --publish never ${{ steps.notarize.outputs.flag }}
+        run: npx electron-builder --mac --publish never ${{ steps.signing.outputs.notarize }}
 
       # Boot the packaged app's bundled server and load the GUI; the app
       # prints DSH_DESKTOP_SMOKE_OK and exits 0 only when both succeed.
@@ -122,6 +130,14 @@ jobs:
       - name: Install dependencies
         working-directory: desktop
         run: npm ci
+
+      - name: Export signing credentials
+        shell: pwsh
+        run: |
+          if ('${{ secrets.CSC_LINK }}' -ne '') {
+            "CSC_LINK=${{ secrets.CSC_LINK }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+            "CSC_KEY_PASSWORD=${{ secrets.CSC_KEY_PASSWORD }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
 
       - name: Build Windows artifacts
         working-directory: desktop
