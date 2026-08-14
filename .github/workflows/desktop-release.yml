@@ -81,7 +81,9 @@ jobs:
 
       - name: Build macOS artifacts
         working-directory: desktop
-        run: npx electron-builder --mac ${{ steps.notarize.outputs.flag }}
+        # --publish never: on a git tag electron-builder would implicitly
+        # publish; the publish job below owns the GitHub Release upload.
+        run: npx electron-builder --mac --publish never ${{ steps.notarize.outputs.flag }}
 
       # Boot the packaged app's bundled server and load the GUI; the app
       # prints DSH_DESKTOP_SMOKE_OK and exits 0 only when both succeed.
@@ -123,7 +125,8 @@ jobs:
 
       - name: Build Windows artifacts
         working-directory: desktop
-        run: npx electron-builder --win
+        # Same --publish never rationale as the mac job.
+        run: npx electron-builder --win --publish never
 
       # Same in-place smoke as the mac job; DSH_DESKTOP_SMOKE_OK + exit 0
       # mean the bundled server booted and the GUI loaded inside the package.

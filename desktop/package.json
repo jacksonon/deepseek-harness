@@ -12,6 +12,7 @@
   },
   "license": "MIT",
   "author": "DeepSeek Harness contributors",
+  "workspaces": [],
   "dependencies": {
     "@deepseek-ai/dsh": "0.1.0-rc.6"
   },
