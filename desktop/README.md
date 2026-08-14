@@ -1,5 +1,7 @@
 # DeepSeek Harness Desktop (Electron shell)
 
+English | [中文](README.zh.md)
+
 A fully standalone Electron desktop app for the DeepSeek Harness Web GUI.
 The harness server runtime (`@deepseek-ai/dsh`) is bundled as a real
 dependency and booted under Electron's own Node (`ELECTRON_RUN_AS_NODE`),
@@ -50,6 +52,14 @@ npm run dist:dir        # unpacked app only, for a quick check
 Artifacts land in `desktop/dist/`. The packaged app is standalone — the
 `dsh` server runtime ships inside it. `asar` is disabled so the bundled
 server and its native modules ship as plain files.
+
+The `dependencies` list deliberately names every `@deepseek-ai` plugin the
+bundled runtime imports, including ones the harness packages only declare as
+`peerDependencies` (for example `@deepseek-ai/cordis-plugin-group`): the
+electron-builder npm collector packages the app's own dependency tree and
+drops peer-only packages, so a plugin that is only a peer would boot fine in
+a checkout and crash clean machines with `ERR_MODULE_NOT_FOUND`. Add a plugin
+here whenever the bundled server needs it at runtime.
 
 ## How it works
 

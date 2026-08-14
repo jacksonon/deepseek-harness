@@ -93,12 +93,18 @@ jobs:
         run: npx electron-builder --mac --publish never ${{ steps.signing.outputs.notarize }}
 
       # Boot the packaged app's bundled server and load the GUI; the app
-      # prints DSH_DESKTOP_SMOKE_OK and exits 0 only when both succeed.
+      # prints DSH_DESKTOP_SMOKE_OK and exits 0 only when both succeed. The
+      # app must run from OUTSIDE the repo checkout: the bundled server
+      # resolves its plugins by walking node_modules up from the app bundle,
+      # so an in-checkout run silently falls through to desktop/node_modules
+      # and masks missing bundled dependencies (v0.1.0 shipped without
+      # @deepseek-ai/cordis-plugin-group exactly this way — CI passed, clean
+      # machines crashed at boot with ERR_MODULE_NOT_FOUND).
       - name: Smoke-test the packaged app
-        working-directory: desktop
         shell: bash
         run: |
-          DSH_DESKTOP_SMOKE=1 "./dist/mac-arm64/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness"
+          cp -R "desktop/dist/mac-arm64/DeepSeek Harness.app" "$RUNNER_TEMP/"
+          DSH_DESKTOP_SMOKE=1 "$RUNNER_TEMP/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness"
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
@@ -143,14 +149,16 @@ jobs:
         # Same --publish never rationale as the mac job.
         run: npx electron-builder --win --publish never
 
-      # Same in-place smoke as the mac job; DSH_DESKTOP_SMOKE_OK + exit 0
-      # mean the bundled server booted and the GUI loaded inside the package.
+      # Same in-place smoke as the mac job, also from OUTSIDE the repo
+      # checkout for the same reason (see the mac smoke step): DSH_DESKTOP_SMOKE_OK
+      # + exit 0 mean the bundled server booted and the GUI loaded inside the
+      # package without falling through to the checkout's node_modules.
       - name: Smoke-test the packaged app
-        working-directory: desktop
         shell: pwsh
         run: |
+          Copy-Item -Recurse "desktop/dist/win-unpacked" "$env:RUNNER_TEMP\win-unpacked"
           $env:DSH_DESKTOP_SMOKE = "1"
-          & "dist/win-unpacked/DeepSeek Harness.exe"
+          & "$env:RUNNER_TEMP\win-unpacked\DeepSeek Harness.exe"
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
